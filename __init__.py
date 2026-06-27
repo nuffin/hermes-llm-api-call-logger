@@ -4,7 +4,9 @@ Hooks into ``pre_api_request`` and ``post_api_request`` to record every
 LLM API call with full request/response details. Correlates pre/post data
 via ``api_request_id``.
 
-DB at ``~/.hermes/personal/llm-call-log.db``.
+DB location is resolved from ``observability.data_dir`` in Hermes
+``config.yaml`` (per-plugin ``observability.llm-api-call-logger.data_dir``
+override supported).  Falls back to ``~/.hermes/llm-call-log.db``.
 """
 
 from __future__ import annotations
@@ -19,7 +21,39 @@ from typing import Any
 
 # ---- paths ------------------------------------------------------------------
 
-_HERMES_PERSONAL = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "personal"
+def _resolve_data_dir() -> Path:
+    """Resolve observability data directory from Hermes config.
+
+    Reads ``$HERMES_HOME/config.yaml``, extracts ``observability.data_dir``
+    (with per-plugin ``observability.llm-api-call-logger.data_dir``
+    override).  Falls back to ``~/.hermes/`` when config is missing or
+    unreadable.
+    """
+    hermes_home = os.environ.get("HERMES_HOME", "")
+    config_path = Path(hermes_home) / "config.yaml" if hermes_home else None
+
+    data_dir = None
+    if config_path and config_path.exists():
+        try:
+            import yaml
+            with open(config_path) as fh:
+                config = yaml.safe_load(fh) or {}
+            obs = config.get("observability", {})
+            # Per-plugin override takes priority
+            data_dir = (
+                obs.get("llm-api-call-logger", {}).get("data_dir")
+                or obs.get("data_dir")
+            )
+        except Exception:
+            pass
+
+    if not data_dir:
+        data_dir = "~/.hermes"
+
+    return Path(data_dir).expanduser()
+
+
+_HERMES_PERSONAL = _resolve_data_dir()
 _DB_PATH = _HERMES_PERSONAL / "llm-call-log.db"
 
 # ---- async write queue ------------------------------------------------------
