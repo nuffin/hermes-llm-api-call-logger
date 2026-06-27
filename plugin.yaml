@@ -1,0 +1,6 @@
+name: llm-api-call-logger
+version: 1.0.0
+description: "Log every LLM API call with full details — input/output tokens, tool calls, raw response, profile, workspace, worker, task. DB at ~/.hermes/personal/llm-call-log.db"
+author: "Hauzer S. Lee"
+hooks:
+  - post_api_request
