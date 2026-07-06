@@ -408,6 +408,13 @@ def _handle_slash_command(args: str) -> str:
                 pass
         return _get_latest_calls(n)
 
+    if cmd == "show":
+        try:
+            call_id = int(rest.strip())
+        except (ValueError, AttributeError):
+            return "Usage: /calls show <id>"
+        return _get_call_detail(call_id)
+
     if cmd == "summary":
         date_str = _parse_date(rest)
         return _get_calls_summary(date_str)
@@ -416,7 +423,8 @@ def _handle_slash_command(args: str) -> str:
         "Usage:\n"
         "  /calls status              — database status\n"
         "  /calls latest [N]          — last N calls (default 5)\n"
-        "  /calls summary [yesterday|2026-06-17]  — daily summary (default today)\n"
+        "  /calls show <id>           — full details of a specific call\n"
+        "  /calls summary [date]      — daily summary (default today)\n"
     )
 
 
@@ -505,6 +513,90 @@ def _get_latest_calls(n: int = 5) -> str:
             f"{r['id']:>4}  {r['created_at']:<19}  {(r['model'] or '')[:22]:<22}  "
             f"{inp:>8,}  {out:>6,}  {tot:>8,}  {dur:>7}  {reason:<12}"
         )
+    return "\n".join(lines)
+
+
+def _get_call_detail(call_id: int) -> str:
+    """Return full details of a single API call by ID."""
+    _init_db()
+    try:
+        conn = sqlite3.connect(str(_DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM llm_api_calls WHERE id = ?", (call_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return f"Cannot read database: {_DB_PATH}"
+
+    if not row:
+        return f"Call #{call_id} not found."
+
+    lines = [f"## Call #{row['id']}\n"]
+    lines.append(f"| Field | Value |")
+    lines.append(f"|-------|-------|")
+
+    basic_fields = [
+        ("Time", "created_at"),
+        ("Session", "session_id"),
+        ("Turn", "turn_id"),
+        ("Model", "model"),
+        ("Provider", "provider"),
+        ("Base URL", "base_url"),
+        ("API Mode", "api_mode"),
+        ("Profile", "profile"),
+        ("Workspace", "workspace"),
+        ("Worker", "worker"),
+        ("Task", "task_id"),
+        ("Skill", "skill"),
+    ]
+    for label, col in basic_fields:
+        val = row[col] or "—"
+        lines.append(f"| {label} | {val} |")
+
+    lines.append(f"| Prompt Tokens | {row['prompt_tokens'] or 0:,} |")
+    lines.append(f"| Completion Tokens | {row['completion_tokens'] or 0:,} |")
+    lines.append(f"| Total Tokens | {row['total_tokens'] or 0:,} |")
+    lines.append(f"| Cache Read | {row['cache_read_tokens'] or 0:,} |")
+    lines.append(f"| Cache Write | {row['cache_write_tokens'] or 0:,} |")
+    lines.append(f"| Reasoning Tokens | {row['reasoning_tokens'] or 0} |")
+    lines.append(f"| Finish Reason | {row['finish_reason'] or '—'} |")
+    lines.append(f"| Duration (s) | {row['api_duration'] or 0:.1f} |")
+    lines.append(f"| Messages | {row['message_count'] or 0} |")
+    lines.append(f"| Tools | {row['tool_count'] or 0} |")
+    lines.append(f"| Approx Input Tokens | {row['approx_input_tokens'] or 0:,} |")
+    lines.append(f"| Request Chars | {row['request_char_count'] or 0:,} |")
+    lines.append(f"| Assistant Tool Calls | {row['assistant_tool_call_count'] or 0} |")
+
+    lines.append("")
+
+    raw_req = row["raw_request"]
+    if raw_req:
+        lines.append("### Raw Request")
+        lines.append("")
+        lines.append("```json")
+        try:
+            parsed = json.loads(raw_req)
+            lines.append(json.dumps(parsed, indent=2, ensure_ascii=False))
+        except (json.JSONDecodeError, TypeError):
+            lines.append(raw_req)
+        lines.append("```")
+        lines.append("")
+
+    raw_resp = row["raw_response"]
+    if raw_resp:
+        lines.append("### Raw Response")
+        lines.append("")
+        lines.append("```json")
+        try:
+            parsed = json.loads(raw_resp)
+            lines.append(json.dumps(parsed, indent=2, ensure_ascii=False))
+        except (json.JSONDecodeError, TypeError):
+            lines.append(raw_resp)
+        lines.append("```")
+
     return "\n".join(lines)
 
 
