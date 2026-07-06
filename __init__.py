@@ -4,7 +4,7 @@ Hooks into ``pre_api_request`` and ``post_api_request`` to record every
 LLM API call with full request/response details. Correlates pre/post data
 via ``api_request_id``.
 
-DB location is resolved from ``observability.data_dir`` in Hermes
+DB location is resolved from ``observability.default.data_dir`` in Hermes
 ``config.yaml`` (per-plugin ``observability.llm-api-call-logger.data_dir``
 override supported).  Falls back to ``~/.hermes/llm-call-log.db``.
 """
@@ -27,21 +27,21 @@ def _read_data_dir_from_observability_config(obs: Any) -> str | None:
     Recognises two structures (in priority order):
       observability:
         llm-api-call-logger:
-          data_dir: <path>          # 1. Plugin-specific (highest priority)
+          data_dir: <path>          # 1. Plugin-specific (highest in-file)
         default:
           data_dir: <path>          # 2. All-plugins default
     """
     if not obs or not isinstance(obs, dict):
         return None
 
-    # 1. Plugin-specific override
+    # 1. Plugin-specific override (new format)
     plugin_cfg = obs.get("llm-api-call-logger")
     if isinstance(plugin_cfg, dict):
         val = plugin_cfg.get("data_dir")
         if val and isinstance(val, str):
             return val
 
-    # 2. All-plugins default
+    # 2. All-plugins default (new format)
     default_cfg = obs.get("default")
     if isinstance(default_cfg, dict):
         val = default_cfg.get("data_dir")
@@ -82,7 +82,7 @@ def _resolve_data_dir() -> Path:
     if env_val:
         return Path(env_val).expanduser()
 
-    # 3-4. Per-profile config (from ``HERMES_HOME``)
+    # 3-5. Per-profile config (from ``HERMES_HOME``)
     hermes_home = os.environ.get("HERMES_HOME", "").strip()
     profile_config_path = Path(hermes_home) / "config.yaml" if hermes_home else None
     data_dir = None
@@ -381,6 +381,213 @@ def _on_session_end(**kw: Any) -> None:
     flush_now()
 
 
+# ---- slash command -----------------------------------------------------------
+
+
+def _handle_slash_command(args: str) -> str:
+    """Handle the ``/calls`` slash command.
+
+    Subcommands:
+      /calls status              — DB location, size, record count
+      /calls latest [N]          — last N calls (default 5)
+      /calls summary [yesterday|2026-06-17]  — daily summary (default today)
+    """
+    parts = args.strip().split(None, 1)
+    cmd = parts[0].lower() if parts else ""
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if cmd == "status":
+        return _get_calls_status()
+
+    if cmd == "latest":
+        n = 5
+        if rest:
+            try:
+                n = max(1, int(rest))
+            except ValueError:
+                pass
+        return _get_latest_calls(n)
+
+    if cmd == "summary":
+        date_str = _parse_date(rest)
+        return _get_calls_summary(date_str)
+
+    return (
+        "用法:\n"
+        "  /calls status              — 数据库状态\n"
+        "  /calls latest [N]          — 最近 N 条（默认 5）\n"
+        "  /calls summary [yesterday|2026-06-17]  — 日汇总（默认今天）\n"
+    )
+
+
+def _parse_date(arg: str) -> str | None:
+    """Parse date argument. None = today, 'yesterday' = yesterday, else date."""
+    arg = arg.strip()
+    if not arg:
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d")
+    if arg == "yesterday":
+        from datetime import datetime, timedelta
+        return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    if arg.startswith("20") and len(arg) >= 10:
+        return arg[:10]
+    return None
+
+
+def _get_calls_status() -> str:
+    """Return DB status: path, size, record count, date range."""
+    _init_db()
+    try:
+        size = _DB_PATH.stat().st_size
+        conn = sqlite3.connect(str(_DB_PATH))
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM llm_api_calls").fetchone()[0]
+            earliest = conn.execute(
+                "SELECT MIN(created_at) FROM llm_api_calls"
+            ).fetchone()[0] or "—"
+            latest_ts = conn.execute(
+                "SELECT MAX(created_at) FROM llm_api_calls"
+            ).fetchone()[0] or "—"
+            total_tokens = conn.execute(
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_api_calls"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+    except Exception:
+        return f"无法读取数据库: {_DB_PATH}"
+
+    size_str = f"{size / 1024 / 1024:.1f} MB" if size > 1024 * 1024 else f"{size / 1024:.1f} KB"
+    token_str = f"{total_tokens / 1_000_000:.1f}M" if total_tokens > 1_000_000 else f"{total_tokens:,}"
+    return (
+        f"**LLM 调用数据库**\n\n"
+        f"| 项目 | 值 |\n"
+        f"|------|-----|\n"
+        f"| 路径 | `{_DB_PATH}` |\n"
+        f"| 大小 | {size_str} |\n"
+        f"| 记录数 | {count:,} |\n"
+        f"| 累计 Tokens | {token_str} |\n"
+        f"| 最早记录 | {earliest} |\n"
+        f"| 最近记录 | {latest_ts} |\n"
+    )
+
+
+def _get_latest_calls(n: int = 5) -> str:
+    """Return the last N API calls in a compact table."""
+    _init_db()
+    try:
+        conn = sqlite3.connect(str(_DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT id, created_at, model, provider, prompt_tokens, "
+                "completion_tokens, total_tokens, api_duration, finish_reason "
+                "FROM llm_api_calls ORDER BY id DESC LIMIT ?",
+                (n,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return f"无法读取数据库: {_DB_PATH}"
+
+    if not rows:
+        return "(暂无记录)"
+
+    lines = [f"**最近 {len(rows)} 条 API 调用**\n"]
+    lines.append(f"{'ID':>4}  {'时间':<19}  {'模型':<22}  {'Input':>8}  {'Out':>6}  {'Total':>8}  {'耗时(s)':>7}  {'状态':<12}")
+    lines.append("-" * 100)
+    for r in rows:
+        dur = f"{r['api_duration']:.1f}" if r['api_duration'] else "-"
+        reason = (r['finish_reason'] or "-")[:12]
+        inp = r['prompt_tokens'] or 0
+        out = r['completion_tokens'] or 0
+        tot = r['total_tokens'] or 0
+        lines.append(
+            f"{r['id']:>4}  {r['created_at']:<19}  {(r['model'] or '')[:22]:<22}  "
+            f"{inp:>8,}  {out:>6,}  {tot:>8,}  {dur:>7}  {reason:<12}"
+        )
+    return "\n".join(lines)
+
+
+def _get_calls_summary(date_str: str | None) -> str:
+    """Return daily summary for a given date (default today)."""
+    if date_str is None:
+        from datetime import datetime
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    _init_db()
+    try:
+        conn = sqlite3.connect(str(_DB_PATH))
+        try:
+            # Totals
+            row = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(prompt_tokens),0), "
+                "COALESCE(SUM(completion_tokens),0), COALESCE(SUM(total_tokens),0), "
+                "COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0) "
+                "FROM llm_api_calls WHERE created_at >= ? AND created_at < ?",
+                (f"{date_str} 00:00:00", f"{date_str} 23:59:59"),
+            ).fetchone()
+            cnt, inp, out, tot, cache_r, cache_w = row
+
+            # By model
+            by_model = conn.execute(
+                "SELECT model, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), "
+                "SUM(total_tokens), ROUND(AVG(api_duration),2) "
+                "FROM llm_api_calls WHERE created_at >= ? AND created_at < ? "
+                "GROUP BY model ORDER BY SUM(total_tokens) DESC",
+                (f"{date_str} 00:00:00", f"{date_str} 23:59:59"),
+            ).fetchall()
+
+            # By provider
+            by_provider = conn.execute(
+                "SELECT provider, COUNT(*), SUM(total_tokens) "
+                "FROM llm_api_calls WHERE created_at >= ? AND created_at < ? "
+                "GROUP BY provider ORDER BY SUM(total_tokens) DESC",
+                (f"{date_str} 00:00:00", f"{date_str} 23:59:59"),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return f"无法读取数据库: {_DB_PATH}"
+
+    if cnt == 0:
+        return f"**{date_str}** — 暂无记录"
+
+    actual_input = inp - cache_r - cache_w
+    lines = [f"**LLM 调用汇总 — {date_str}**\n"]
+    lines.append(f"| 指标 | 数值 |")
+    lines.append(f"|------|------|")
+    lines.append(f"| API 请求数 | {cnt} |")
+    lines.append(f"| Input (新) | {actual_input:,} |")
+    if cache_r:
+        lines.append(f"| Cache Read | {cache_r:,} |")
+    if cache_w:
+        lines.append(f"| Cache Write | {cache_w:,} |")
+    lines.append(f"| Input (合计) | {inp:,} |")
+    lines.append(f"| Output | {out:,} |")
+    lines.append(f"| 总计 | {tot:,} |")
+    if cnt:
+        lines.append(f"| 平均/请求 | {tot // cnt:,} |")
+    lines.append("")
+
+    if by_model:
+        lines.append(f"**按模型**\n")
+        lines.append(f"| 模型 | 请求 | Input | Output | 总计 | 平均耗时(s) |")
+        lines.append(f"|------|------|-------|--------|------|------------|")
+        for m in by_model:
+            model_name, mcnt, minp, mout, mtot, mdur = m
+            lines.append(f"| {model_name} | {mcnt} | {minp:,} | {mout:,} | {mtot:,} | {mdur} |")
+        lines.append("")
+
+    if by_provider:
+        lines.append(f"**按 Provider**\n")
+        lines.append(f"| Provider | 请求 | 总 Tokens |")
+        lines.append(f"|----------|------|-----------|")
+        for p in by_provider:
+            lines.append(f"| {p[0]} | {p[1]} | {p[2]:,} |")
+
+    return "\n".join(lines)
+
+
 # ---- plugin entry point -----------------------------------------------------
 
 
@@ -390,6 +597,14 @@ def register(ctx: Any) -> None:
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("on_session_end", _on_session_end)
+
+    # ── Slash command: /calls ──
+    ctx.register_command(
+        name="calls",
+        handler=_handle_slash_command,
+        description="LLM call log: status/latest/summary",
+        args_hint="status | latest [N] | summary [date]",
+    )
 
     # Add migration columns
     try:
