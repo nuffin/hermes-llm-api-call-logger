@@ -47,6 +47,14 @@ config (`~/.hermes/config.yaml`) → `~/.hermes`.
 |------|---------|
 | `<data_dir>/llm-call-log.db` | SQLite database of all LLM API calls |
 
+## Usage
+
+### Slash commands (in-session)
+
+- `/calls status` — DB location, size, record count
+- `/calls latest [N]` — last N API calls (default 5)
+- `/calls summary [yesterday|2026-06-17]` — daily summary (default today)
+
 ## Schema
 
 ```sql
