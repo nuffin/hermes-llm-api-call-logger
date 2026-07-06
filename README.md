@@ -37,6 +37,7 @@ In-session slash commands:
 
 - `/calls status` — database path, size, record count
 - `/calls latest [N]` — last N API calls (default: 5)
+- `/calls show <id>` — full details of a specific call
 - `/calls summary [date]` — daily summary (default: today)
 
 ## License
