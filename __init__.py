@@ -413,10 +413,10 @@ def _handle_slash_command(args: str) -> str:
         return _get_calls_summary(date_str)
 
     return (
-        "用法:\n"
-        "  /calls status              — 数据库状态\n"
-        "  /calls latest [N]          — 最近 N 条（默认 5）\n"
-        "  /calls summary [yesterday|2026-06-17]  — 日汇总（默认今天）\n"
+        "Usage:\n"
+        "  /calls status              — database status\n"
+        "  /calls latest [N]          — last N calls (default 5)\n"
+        "  /calls summary [yesterday|2026-06-17]  — daily summary (default today)\n"
     )
 
 
@@ -454,20 +454,20 @@ def _get_calls_status() -> str:
         finally:
             conn.close()
     except Exception:
-        return f"无法读取数据库: {_DB_PATH}"
+        return f"Cannot read database: {_DB_PATH}"
 
     size_str = f"{size / 1024 / 1024:.1f} MB" if size > 1024 * 1024 else f"{size / 1024:.1f} KB"
     token_str = f"{total_tokens / 1_000_000:.1f}M" if total_tokens > 1_000_000 else f"{total_tokens:,}"
     return (
-        f"**LLM 调用数据库**\n\n"
-        f"| 项目 | 值 |\n"
-        f"|------|-----|\n"
-        f"| 路径 | `{_DB_PATH}` |\n"
-        f"| 大小 | {size_str} |\n"
-        f"| 记录数 | {count:,} |\n"
-        f"| 累计 Tokens | {token_str} |\n"
-        f"| 最早记录 | {earliest} |\n"
-        f"| 最近记录 | {latest_ts} |\n"
+        f"**LLM Call Database**\n\n"
+        f"| Item | Value |\n"
+        f"|------|------|\n"
+        f"| Path | `{_DB_PATH}` |\n"
+        f"| Size | {size_str} |\n"
+        f"| Records | {count:,} |\n"
+        f"| Total Tokens | {token_str} |\n"
+        f"| Earliest | {earliest} |\n"
+        f"| Latest | {latest_ts} |\n"
     )
 
 
@@ -487,13 +487,13 @@ def _get_latest_calls(n: int = 5) -> str:
         finally:
             conn.close()
     except Exception:
-        return f"无法读取数据库: {_DB_PATH}"
+        return f"Cannot read database: {_DB_PATH}"
 
     if not rows:
-        return "(暂无记录)"
+        return "(no records)"
 
-    lines = [f"**最近 {len(rows)} 条 API 调用**\n"]
-    lines.append(f"{'ID':>4}  {'时间':<19}  {'模型':<22}  {'Input':>8}  {'Out':>6}  {'Total':>8}  {'耗时(s)':>7}  {'状态':<12}")
+    lines = [f"**Last {len(rows)} API Calls**\n"]
+    lines.append(f"{'ID':>4}  {'Time':<19}  {'Model':<22}  {'Input':>8}  {'Out':>6}  {'Total':>8}  {'Time(s)':>7}  {'Status':<12}")
     lines.append("-" * 100)
     for r in rows:
         dur = f"{r['api_duration']:.1f}" if r['api_duration'] else "-"
@@ -547,31 +547,31 @@ def _get_calls_summary(date_str: str | None) -> str:
         finally:
             conn.close()
     except Exception:
-        return f"无法读取数据库: {_DB_PATH}"
+        return f"Cannot read database: {_DB_PATH}"
 
     if cnt == 0:
-        return f"**{date_str}** — 暂无记录"
+        return f"**{date_str}** — No records"
 
     actual_input = inp - cache_r - cache_w
-    lines = [f"**LLM 调用汇总 — {date_str}**\n"]
-    lines.append(f"| 指标 | 数值 |")
+    lines = [f"**LLM Call Summary — {date_str}**\n"]
+    lines.append(f"| Metric | Value |")
     lines.append(f"|------|------|")
-    lines.append(f"| API 请求数 | {cnt} |")
-    lines.append(f"| Input (新) | {actual_input:,} |")
+    lines.append(f"| API Requests | {cnt} |")
+    lines.append(f"| Input (New) | {actual_input:,} |")
     if cache_r:
         lines.append(f"| Cache Read | {cache_r:,} |")
     if cache_w:
         lines.append(f"| Cache Write | {cache_w:,} |")
-    lines.append(f"| Input (合计) | {inp:,} |")
+    lines.append(f"| Input (Total) | {inp:,} |")
     lines.append(f"| Output | {out:,} |")
-    lines.append(f"| 总计 | {tot:,} |")
+    lines.append(f"| Total | {tot:,} |")
     if cnt:
-        lines.append(f"| 平均/请求 | {tot // cnt:,} |")
+        lines.append(f"| Avg per Request | {tot // cnt:,} |")
     lines.append("")
 
     if by_model:
-        lines.append(f"**按模型**\n")
-        lines.append(f"| 模型 | 请求 | Input | Output | 总计 | 平均耗时(s) |")
+        lines.append(f"**By Model**\n")
+        lines.append(f"| Model | Requests | Input | Output | Total | Avg Time(s) |")
         lines.append(f"|------|------|-------|--------|------|------------|")
         for m in by_model:
             model_name, mcnt, minp, mout, mtot, mdur = m
@@ -579,8 +579,8 @@ def _get_calls_summary(date_str: str | None) -> str:
         lines.append("")
 
     if by_provider:
-        lines.append(f"**按 Provider**\n")
-        lines.append(f"| Provider | 请求 | 总 Tokens |")
+        lines.append(f"**By Provider**\n")
+        lines.append(f"| Provider | Requests | Total Tokens |")
         lines.append(f"|----------|------|-----------|")
         for p in by_provider:
             lines.append(f"| {p[0]} | {p[1]} | {p[2]:,} |")
