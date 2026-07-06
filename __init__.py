@@ -24,35 +24,29 @@ from typing import Any
 def _read_data_dir_from_observability_config(obs: Any) -> str | None:
     """Extract ``data_dir`` from an ``observability`` config dict.
 
-    Recognises three structures (in priority order):
+    Recognises two structures (in priority order):
       observability:
         llm-api-call-logger:
-          data_dir: <path>          # 1. Plugin-specific (highest in-file)
+          data_dir: <path>          # 1. Plugin-specific (highest priority)
         default:
           data_dir: <path>          # 2. All-plugins default
-        data_dir: <path>            # 3. Legacy flat format (backward compat)
     """
     if not obs or not isinstance(obs, dict):
         return None
 
-    # 1. Plugin-specific override (new format)
+    # 1. Plugin-specific override
     plugin_cfg = obs.get("llm-api-call-logger")
     if isinstance(plugin_cfg, dict):
         val = plugin_cfg.get("data_dir")
         if val and isinstance(val, str):
             return val
 
-    # 2. All-plugins default (new format)
+    # 2. All-plugins default
     default_cfg = obs.get("default")
     if isinstance(default_cfg, dict):
         val = default_cfg.get("data_dir")
         if val and isinstance(val, str):
             return val
-
-    # 3. Backward compatibility: legacy flat ``data_dir`` string
-    val = obs.get("data_dir")
-    if val and isinstance(val, str):
-        return val
 
     return None
 
@@ -77,9 +71,8 @@ def _resolve_data_dir() -> Path:
       2. ``OBSERVABILITY_DATA_DIR`` env var (generic)
       3. Per-profile config:  ``observability.llm-api-call-logger.data_dir``
       4. Per-profile config:  ``observability.default.data_dir``
-      5. Per-profile config:  ``observability.data_dir`` (legacy flat, backwards compat)
-      6. Global config (from hermes root): same structure as steps 3-5
-      7. Fallback:  ``~/.hermes``
+      5. Global config (from hermes root): same structure as steps 3-4
+      6. Fallback:  ``~/.hermes``
     """
     # 1-2. Env var overrides
     env_val = os.environ.get("LLM_API_CALL_DATA_DIR", "").strip()
@@ -89,7 +82,7 @@ def _resolve_data_dir() -> Path:
     if env_val:
         return Path(env_val).expanduser()
 
-    # 3-5. Per-profile config (from ``HERMES_HOME``)
+    # 3-4. Per-profile config (from ``HERMES_HOME``)
     hermes_home = os.environ.get("HERMES_HOME", "").strip()
     profile_config_path = Path(hermes_home) / "config.yaml" if hermes_home else None
     data_dir = None
