@@ -21,32 +21,102 @@ from typing import Any
 
 # ---- paths ------------------------------------------------------------------
 
-def _resolve_data_dir() -> Path:
-    """Resolve observability data directory from Hermes config.
+def _read_data_dir_from_observability_config(obs: Any) -> str | None:
+    """Extract ``data_dir`` from an ``observability`` config dict.
 
-    Reads ``$HERMES_HOME/config.yaml``, extracts ``observability.data_dir``
-    (with per-plugin ``observability.llm-api-call-logger.data_dir``
-    override).  Falls back to ``~/.hermes/`` when config is missing or
-    unreadable.
+    Recognises three structures (in priority order):
+      observability:
+        llm-api-call-logger:
+          data_dir: <path>          # 1. Plugin-specific (highest in-file)
+        default:
+          data_dir: <path>          # 2. All-plugins default
+        data_dir: <path>            # 3. Legacy flat format (backward compat)
     """
-    hermes_home = os.environ.get("HERMES_HOME", "")
-    config_path = Path(hermes_home) / "config.yaml" if hermes_home else None
+    if not obs or not isinstance(obs, dict):
+        return None
 
+    # 1. Plugin-specific override (new format)
+    plugin_cfg = obs.get("llm-api-call-logger")
+    if isinstance(plugin_cfg, dict):
+        val = plugin_cfg.get("data_dir")
+        if val and isinstance(val, str):
+            return val
+
+    # 2. All-plugins default (new format)
+    default_cfg = obs.get("default")
+    if isinstance(default_cfg, dict):
+        val = default_cfg.get("data_dir")
+        if val and isinstance(val, str):
+            return val
+
+    # 3. Backward compatibility: legacy flat ``data_dir`` string
+    val = obs.get("data_dir")
+    if val and isinstance(val, str):
+        return val
+
+    return None
+
+
+def _read_config_yaml(config_path: Path | None) -> dict:
+    """Safely read and parse a YAML config file. Returns empty dict on failure."""
+    if not config_path or not config_path.exists():
+        return {}
+    try:
+        import yaml
+        with open(config_path) as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def _resolve_data_dir() -> Path:
+    """Resolve the observability data directory with multi-layer priority.
+
+    Priority chain (highest to lowest):
+      1. ``LLM_API_CALL_DATA_DIR`` env var (plugin-specific)
+      2. ``OBSERVABILITY_DATA_DIR`` env var (generic)
+      3. Per-profile config:  ``observability.llm-api-call-logger.data_dir``
+      4. Per-profile config:  ``observability.default.data_dir``
+      5. Per-profile config:  ``observability.data_dir`` (legacy flat, backwards compat)
+      6. Global config (from hermes root): same structure as steps 3-5
+      7. Fallback:  ``~/.hermes``
+    """
+    # 1-2. Env var overrides
+    env_val = os.environ.get("LLM_API_CALL_DATA_DIR", "").strip()
+    if env_val:
+        return Path(env_val).expanduser()
+    env_val = os.environ.get("OBSERVABILITY_DATA_DIR", "").strip()
+    if env_val:
+        return Path(env_val).expanduser()
+
+    # 3-5. Per-profile config (from ``HERMES_HOME``)
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    profile_config_path = Path(hermes_home) / "config.yaml" if hermes_home else None
     data_dir = None
-    if config_path and config_path.exists():
-        try:
-            import yaml
-            with open(config_path) as fh:
-                config = yaml.safe_load(fh) or {}
-            obs = config.get("observability", {})
-            # Per-plugin override takes priority
-            data_dir = (
-                obs.get("llm-api-call-logger", {}).get("data_dir")
-                or obs.get("data_dir")
-            )
-        except Exception:
-            pass
+    if profile_config_path:
+        config = _read_config_yaml(profile_config_path)
+        data_dir = _read_data_dir_from_observability_config(
+            config.get("observability")
+        )
 
+    # 6. Global config (from hermes root — shared by all profiles)
+    if not data_dir:
+        # Avoid re-reading the same file when ``HERMES_HOME`` *is* the root
+        try:
+            from hermes_constants import get_default_hermes_root
+        except ImportError:
+            get_default_hermes_root = None
+
+        if get_default_hermes_root is not None:
+            global_config_path = get_default_hermes_root() / "config.yaml"
+            if (profile_config_path is None
+                    or global_config_path.resolve() != profile_config_path.resolve()):
+                config = _read_config_yaml(global_config_path)
+                data_dir = _read_data_dir_from_observability_config(
+                    config.get("observability")
+                )
+
+    # 7. Hard-coded fallback
     if not data_dir:
         data_dir = "~/.hermes"
 
