@@ -5,9 +5,16 @@ and response details, including tokens, tool calls, and raw payloads.
 
 ## Installation
 
+### Via symlink (recommended for development)
+
 ```bash
-git clone https://github.com/nuffin/hermes-llm-api-call-logger.git
-cp -r hermes-llm-api-call-logger ~/.hermes/plugins/llm-api-call-logger
+ln -sf $(pwd) ~/.hermes/plugins/llm-api-call-logger
+```
+
+### Via pip
+
+```bash
+pip install hermes-llm-api-call-logger-pip
 ```
 
 Enable the plugin in your Hermes `config.yaml`:
