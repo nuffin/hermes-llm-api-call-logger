@@ -317,8 +317,8 @@ def _on_pre_api_request(**kw: Any) -> None:
             "tool_count": int(kw.get("tool_count", 0)),
             "approx_input_tokens": int(kw.get("approx_input_tokens", 0)),
             "request_char_count": int(kw.get("request_char_count", 0)),
-            "request_messages": _safe_json(kw.get("request_messages"), max_chars=100000),
-            "raw_request": _safe_json(kw.get("request"), max_chars=100000),
+            "request_messages": _safe_json(kw.get("request_messages"), max_chars=10000000),
+            "raw_request": _safe_json(kw.get("request"), max_chars=10000000),
         }
 
 
@@ -366,7 +366,7 @@ def _on_post_api_request(**kw: Any) -> None:
         "request_char_count": req_data.get("request_char_count", 0),
         "assistant_tool_call_count": int(kw.get("assistant_tool_call_count", 0)),
         "raw_request": req_data.get("raw_request") or req_data.get("request_messages"),
-        "raw_response": _safe_json(kw.get("response"), max_chars=50000),
+        "raw_response": _safe_json(kw.get("response"), max_chars=10000000),
         "created_at": now,
     }
 
