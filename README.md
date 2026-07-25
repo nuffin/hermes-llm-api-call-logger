@@ -50,3 +50,11 @@ In-session slash commands:
 ## License
 
 MIT
+
+
+## Repositories
+
+| Role | Repo | PyPI |
+|------|------|------|
+| Plugin code (this repo) | `hermes-llm-api-call-logger` | — |
+| Pip wrapper | `hermes-llm-api-call-logger-pip` | `hermes-llm-api-call-logger` |
