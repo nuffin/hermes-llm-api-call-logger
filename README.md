@@ -14,7 +14,7 @@ ln -sf $(pwd) ~/.hermes/plugins/llm-api-call-logger
 ### Via pip
 
 ```bash
-pip install hermes-llm-api-call-logger-pip
+pip install hermes-llm-api-call-logger
 ```
 
 Enable the plugin in your Hermes `config.yaml`:
