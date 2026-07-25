@@ -56,5 +56,5 @@ MIT
 
 | Role | Repo | PyPI |
 |------|------|------|
-| Plugin code (this repo) | `hermes-llm-api-call-logger` | — |
-| Pip wrapper | `hermes-llm-api-call-logger-pip` | `hermes-llm-api-call-logger` |
+| Plugin code (this repo) | [hermes-llm-api-call-logger](https://github.com/nuffin/hermes-llm-api-call-logger) | — |
+| Pip wrapper | [hermes-llm-api-call-logger-pip](https://github.com/nuffin/hermes-llm-api-call-logger-pip) | [hermes-llm-api-call-logger](https://pypi.org/project/hermes-llm-api-call-logger/) |
