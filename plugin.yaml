@@ -4,3 +4,7 @@ description: "Log every LLM API call with full details — input/output tokens, 
 author: "Hauzer S. Lee"
 hooks:
   - post_api_request
+provides_hooks:
+  - on_session_end
+  - post_api_request
+  - pre_api_request
